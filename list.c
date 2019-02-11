@@ -21,7 +21,7 @@ void msh_list_item_init (struct msh_list_item *self)
     self->next = MSH_LIST_NOTINLIST;
 }
 
-/*
+
 struct msh_list_item *msh_list_begin (struct msh_list *self)
 {
     return self->first;
@@ -32,27 +32,29 @@ struct msh_list_item *msh_list_end (struct msh_list *self)
     return NULL;
 }
 
+
 struct msh_list_item *msh_list_prev (struct msh_list *self,
     struct msh_list_item *it)
+
 {
     if (!it)
         return self->last;
-    nn_assert (it->prev != NN_LIST_NOTINLIST);
     return it->prev;
 }
 
-struct msh_list_item *msh_list_next (NN_UNUSED struct msh_list *self,
+struct msh_list_item *msh_list_next (struct msh_list *self,
     struct msh_list_item *it)
 {
-    nn_assert (it->next != NN_LIST_NOTINLIST);
     return it->next;
 }
 
-void msh_list_insert (struct msh_list *self, struct msh_list_item *item,
-    struct msh_list_item *it)
-{
-    nn_assert (!msh_list_item_isinlist (item));
 
+
+/*
+ * insert @item before @it, if @it is NULL, append to @self's tail
+ */
+void msh_list_insert (struct msh_list *self, struct msh_list_item *item, struct msh_list_item *it)
+{
     item->prev = it ? it->prev : self->last;
     item->next = it;
     if (item->prev)
@@ -65,6 +67,7 @@ void msh_list_insert (struct msh_list *self, struct msh_list_item *item,
         self->last = item;
 }
 
+/*
 struct msh_list_item *msh_list_erase (struct msh_list *self,
     struct msh_list_item *item)
 {

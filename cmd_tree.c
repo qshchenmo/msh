@@ -2,141 +2,73 @@
 #include <stdlib.h>
 #include <string.h>
 #include "list.h"
+#include "cont.h"
 #include "cmd_tree.h"
 
-#define CMD_ELEMHELP_SIZE   64
-#define CMD_ELEMNAME_SIZE   64
+#define CMD_NAME_SIZE 16
+#define CMD_OPTION_MAX 16
+#define CMD_PREFIX_MAX 8
 
-#define CMD_ELEMENT_MAX     9
+#define CMD_NODE_F_LAST (1<<0)
 
-typedef enum{
-    ELEM_DUMMYROOT,
-    ELEM_KW,
-    ELEM_INTEGER,
-    ELEM_STRING,
-    ELEM_MAX
-}MSH_CMDELEM_TYPE;
-
-
-struct cmd_element 
+typedef enum
 {
-    char name[CMD_ELEMNAME_SIZE];
-    char help[CMD_ELEMHELP_SIZE];
-    unsigned int id;       
+    CMD_OPTION_STRING,
+    CMD_OPTION_INTERER,
+    CMD_OPTION_KEYWORD,
+}CMD_OPTION_TYPE;
+
+struct cmd_prefix
+{
+    char name[CMD_NAME_SIZE];
 };
 
+struct cmd_prefixs
+{
+    struct cmd_prefix prefix[CMD_PREFIX_MAX];
+    int nr;
+};
+
+struct cmd_option
+{
+    int name[CMD_NAME_SIZE];
+    int required;
+};
+
+struct cmd_options
+{
+    struct cmd_option opt[CMD_OPTION_MAX];
+    int nr;
+};
+
+/*
+ *  command register contex
+ */
 struct cmd_ctx
 {
-    struct cmd_element elements[CMD_ELEMENT_MAX];
-    int index;
+    //struct msh_list prefix;
+    struct cmd_prefixs *prefixs;
+    struct cmd_options *opts;
     int err;
 };
 
 struct cmd_node
 {
-    struct msh_list_item self; 
-    char name[CMD_ELEMNAME_SIZE];
-    char help[CMD_ELEMHELP_SIZE];
-    unsigned int id;
-    unsigned int refcount;
-    MSH_CMDELEM_TYPE type;
+    char name[CMD_NAME_SIZE]; 
+    struct msh_list_item self;
     struct msh_list child;
+    int flag;
+    struct cmd_options *opts; /* only valid when this node is a key node */
 };
 
-
+/* global cmd tree root */
 static struct cmd_node* root = NULL;
 
-
-typedef enum{
-    PATH_STATUS_NORMAL,
-    PATH_STATUS_SQUARE,
-    PATH_STATUS_BIG,
-}PATH_STATUS;
-
-/*
- *  check cmd path
- *  eg.  1 2 3 {4 | [ 5 } 6
- */
-static int cmd_path_check(char* path, struct cmd_ctx* ctx)
-{
-    int err = 0;
-    int pathlen  = strlen(path);
-    int index_max = ctx->index - 1;
-    PATH_STATUS status = PATH_STATUS_NORMAL;
-    
-    char* ptr = path;
-    char c;
-    
-    while((c = *ptr++) != '\0')
-    {
-        if (c == ' ')
-        {
-            continue;
-        }
-        else if (c == '[')
-        {
-            if (status != PATH_STATUS_NORMAL)
-            {
-                goto check_err;
-            }
-            status = PATH_STATUS_SQUARE;
-        }
-        else if (c == ']')
-        {
-            if (status != PATH_STATUS_SQUARE)
-            {
-                goto check_err;
-            }
-            status = PATH_STATUS_NORMAL;
-        }
-        else if (c == '{')
-        {
-            if (status != PATH_STATUS_NORMAL)
-            {
-                goto check_err;
-            }
-            status = PATH_STATUS_BIG;           
-        }
-        else if (c == '}')
-        {
-            if (status != PATH_STATUS_BIG)
-            {
-                goto check_err;
-            }
-            status = PATH_STATUS_NORMAL;
-        }        
-        else if (c == '|')
-        {
-            if (status == PATH_STATUS_NORMAL)
-            {
-                goto check_err;
-            }
-        }
-        else if((c >= '0') && (c <= '9'))
-        {
-            int idx = c - '0';
-            if ((idx > index_max) || ((*ptr >= '0') && (*ptr <= '9')))
-            {
-                goto check_err;
-            }
-        }
-        else 
-        {
-            goto check_err;
-        }
-    }
-
-    return 0;
-   
-check_err:
-    return -1;
-    
-}
 
 /*
  * Create a new node 
  */
-struct cmd_node* cmd_node_create(MSH_CMDELEM_TYPE type, char* name, char* help)
+static struct cmd_node* cmd_node_create(char* name)
 {
     struct cmd_node* n = NULL;
 
@@ -149,65 +81,33 @@ struct cmd_node* cmd_node_create(MSH_CMDELEM_TYPE type, char* name, char* help)
     bzero(n, sizeof(struct cmd_node));
 
     msh_list_item_init(&n->self);
-
-    n->refcount = 1;
     
     if (NULL != name)
     {
         memcpy(n->name, name, strlen(name));
     }
-
-    if (NULL != help)
-    {
-        memcpy(n->help, help, strlen(help));
-    }
     
-    n->type = type;
-
     msh_list_init(&n->child);
 
     return n;
 }
 
-/*
- * define a new element
- */
-int cmd_def_element(char* name, char* help, unsigned int id, void* _ctx)
+static struct cmd_node* cmd_search_prefix(struct cmd_node* r, char* name)
 {
-    struct cmd_ctx* ctx = _ctx;
-    if (ctx->err != 0)
-    {
-        goto err_out;    
-    }
+    struct msh_list_item *it;
+    struct cmd_node* n = NULL;
     
-    if (ctx->index == CMD_ELEMENT_MAX)
-    {   
-        goto err_out;
-    }
-
-    int namelen = strlen(name);
-    int helplen = strlen(help);
-
-    if ((namelen >= CMD_ELEMNAME_SIZE) || (helplen >= CMD_ELEMHELP_SIZE))
+    for (it = msh_list_begin(&r->child);
+         it != msh_list_end (&r->child);
+         it = msh_list_next (&r->child, it)) 
     {
-        goto err_out;
+        n = msh_cont (it, struct cmd_node, self);
+        if ((strlen(n->name) == strlen(name)) && (0 == strcmp(n->name, name))) 
+        {
+            return n;
+        }
     }
-
-    memcpy(ctx->elements[ctx->index].name, name, namelen);
-    ctx->elements[ctx->index].name[namelen] = '\0';
-
-    memcpy(ctx->elements[ctx->index].help, help, helplen);
-    ctx->elements[ctx->index].help[helplen] = '\0';
-
-    ctx->index++;
-    
-    return 0;
-err_out:
-    ctx->err = -1;
-
-    return -1;
 }
-
 
 /*
  * create cmd context
@@ -221,7 +121,6 @@ void* cmd_ctx_create(void)
     {
          bzero(c, sizeof(struct cmd_ctx));
 
-         c->index = 0;
          c->err   = 0;
     }
 
@@ -231,10 +130,20 @@ void* cmd_ctx_create(void)
 /*
  * destroy cmd command
  */
-void cmd_ctx_destroy(void* ctx)
+void cmd_ctx_destroy(void* _ctx)
 {
+    struct cmd_ctx* ctx = (struct cmd_ctx*)_ctx;
     if (NULL != ctx)
     {
+        if (NULL != ctx->prefixs)
+        {
+            free(ctx->prefixs);
+        }
+
+        if ((NULL != ctx->opts) && (ctx->err != 0))
+        {
+            free(ctx->opts);
+        }
         free(ctx);
     }
 
@@ -242,19 +151,200 @@ void cmd_ctx_destroy(void* ctx)
 }
 
 /*
- *  register one command
+ * define command prefix
+ * eg.
  */
-int cmd_register(char* path, void* _ctx)
+void cmd_def_prefix(char* name, void* _ctx)
 {
     struct cmd_ctx* ctx = (struct cmd_ctx*)_ctx;
     
     if (ctx->err != 0)
     {
-        return -1;
+        return;
+    }    
+
+    /* FIXME: help infomation */   
+
+    if (ctx->prefixs == NULL)
+    {
+        ctx->prefixs = (struct cmd_prefixs*)malloc(sizeof(struct cmd_prefixs));
+    
+        bzero(ctx->prefixs, sizeof(struct cmd_prefixs));    
+    }
+    
+    struct cmd_prefix *prefix = &ctx->prefixs->prefix[ctx->prefixs->nr++];
+
+    memcpy(prefix->name, name, strlen(name));
+
+    return;
+}
+
+/*
+ * define option
+ */
+void cmd_def_option(char* name, int required, void* _ctx)
+{
+    struct cmd_ctx* ctx = (struct cmd_ctx*)_ctx;
+    if (ctx->err != 0)
+    {
+        return;
+    }    
+
+    if (ctx->opts == NULL)    
+    {
+        ctx->opts = (struct cmd_options*)malloc(sizeof(struct cmd_options));   
+        bzero(ctx->opts, sizeof(struct cmd_options));
     }
 
-    return cmd_path_check(path, ctx);
+    struct cmd_option *opt = &ctx->opts->opt[ctx->opts->nr++];
+    
+    memcpy(opt->name, name, strlen(name));
+
+    opt->required = required;
+
+    return;
 }
+
+/*
+ * register an command
+ */
+void cmd_register(void* _ctx)
+{
+    int i,j;
+    struct cmd_node* r = root;
+    struct cmd_node* s;
+    struct cmd_node* n;
+    struct cmd_ctx* ctx = (struct cmd_ctx*)_ctx;
+    if (ctx->err != 0)
+    {
+        return;
+    }
+
+    /* find */
+    
+    
+    for (i = 0; i < ctx->prefixs->nr; i++)
+    {
+        s = cmd_search_prefix(r, ctx->prefixs->prefix[i].name);
+        if (s == NULL)
+        {
+            break;
+        }
+
+        r = s;
+    }
+    
+    for (j = i; j < ctx->prefixs->nr; j++)
+    {
+        /* create new cmd_node*/
+        n = cmd_node_create(ctx->prefixs->prefix[j].name);
+        
+        msh_list_insert(&r->child, &n->self, NULL);
+
+        r = n;
+    }
+
+    /* now, @r is the last prefix */
+    if (NULL != r->opts)
+    {
+        ctx->err = -1;
+    }
+    else
+    {
+        r->opts = ctx->opts;       
+        r->flag |= CMD_NODE_F_LAST;
+    }
+
+    return;
+}
+
+static int cmd_getword_frominput(char* input, int offset, char* buf)
+{
+    char* ptr;
+    char* start;
+    int step = 0;
+    
+    if (offset >= strlen(input))
+        return -1;
+
+    ptr  = input + offset;
+ 
+    
+    /* skip space */
+    while(*ptr == ' ')
+    {
+        ptr++;
+    }
+
+    start = ptr;
+
+    do {
+        ptr++;
+    }while(*ptr != '\0' && *ptr != ' ');
+
+    memcpy(buf, start, ptr - start);
+
+    return ptr-input;
+}
+
+static void cmd_help_prefix(struct cmd_node* r, char* condition)
+{
+    struct msh_list_item *it;
+    struct cmd_node* n = NULL;
+    
+    for (it = msh_list_begin(&r->child);
+         it != msh_list_end (&r->child);
+         it = msh_list_next (&r->child, it)) 
+    {
+        n = msh_cont (it, struct cmd_node, self);
+        if (0 == strncmp(n->name, condition, strlen(condition))) 
+        {
+            printf("\n%s", n->name);
+        }
+    }
+
+    return;
+}
+
+int cmd_help(char* input)
+{
+    char buf[CMD_NAME_SIZE];
+    int step = 0;
+    int offset = 0;
+    struct cmd_node* r = root;
+    struct cmd_node* s;
+    
+
+    for(;;)
+    {
+        bzero(buf, CMD_NAME_SIZE);        
+        offset = cmd_getword_frominput(input, offset, buf);
+        if (-1 == offset)
+        {
+            break; 
+        }
+
+        s = cmd_search_prefix(r, buf);
+        if (NULL == s)
+        {
+            if (r->flag & CMD_NODE_F_LAST)
+            {
+                /* FIXME, help options */
+            }
+            else
+            {
+                cmd_help_prefix(r, buf);
+            }
+            break;
+        }
+        r = s;
+    }
+    //struct cmd_node* cmd_search_prefix(struct cmd_node* r, char* name)
+
+   // printf("hello\n");
+   return 0;
+}
+
 
 int test_cmd(void)
 {
@@ -264,31 +354,11 @@ int test_cmd(void)
 
     ctx = cmd_ctx_create();
 
-    /* 0 */
-    cmd_def_element("abc", "abc-help", 0, ctx);
+    cmd_def_prefix("abc", ctx);
 
-    /* 1 */
-    cmd_def_element("def", "def-help", 0, ctx);
+    cmd_def_prefix("def", ctx);
 
-    /* 2 */
-    cmd_def_element("eee", "def-help", 0, ctx);
-
-    /* 3 */
-    cmd_def_element("fff", "def-help", 0, ctx);
-
-    /* 4 */
-    cmd_def_element("qqq", "def-help", 0, ctx);
-    
-    /* abc def */
-    err = cmd_register("0 1 { [ 2 | 3 ] } 4", ctx);
-    if (err == 0)
-    {
-        printf("register cmd1 succeed\n");
-    }
-    else
-    {
-        printf("register cmd1 failed\n");
-    }
+    cmd_register(ctx);
     
     cmd_ctx_destroy(ctx);
 
@@ -297,10 +367,12 @@ int test_cmd(void)
 
 
 
+
+
 int cmd_tree_init(void)
 {  
     /* create root element */
-    root = cmd_node_create(ELEM_DUMMYROOT, NULL, NULL);
+    root = cmd_node_create("root");
     if (NULL == root)
     {
         return -1;

@@ -11,8 +11,6 @@ int main(int argc, char* argv[]){
 
     test_cmd();
     
-    exit(0);
-    
     /* Terminal Subsystem Init */    
     msh_init();
     

@@ -9,6 +9,7 @@
 #include <errno.h>
 
 #include "msh_term.h"
+#include "cmd_tree.h"
 
 typedef enum{
     ESC_UNKNOW,
@@ -613,10 +614,15 @@ static void msh_resetbuff(void){
     return;
 }
 
-static LINE_PROCESS_RESULT msh_process(LINE_END_STATUS end, char* pcCmdString)
+static LINE_PROCESS_RESULT msh_process(LINE_END_STATUS end, char* usr_input)
 {
     if (end == END_WITH_TAB)
     {
+        // printf("\nhello");
+        
+        
+        cmd_help(usr_input);
+    
         return PROCESS_REDISPLAY;
     }
 
