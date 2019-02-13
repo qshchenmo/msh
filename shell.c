@@ -9,7 +9,7 @@
 #include <errno.h>
 
 #include "msh_term.h"
-#include "cmd_tree.h"
+#include "cmd.h"
 
 typedef enum{
     ESC_UNKNOW,
@@ -23,6 +23,7 @@ typedef enum{
 typedef enum{
     END_WITH_ENTER,
     END_WITH_TAB,
+    END_WITH_CTRLC,
 }LINE_END_STATUS;
 
 typedef enum{
@@ -51,18 +52,19 @@ typedef struct
     struct termios termios_backup;
 }msh_shell;
 
-
+#define MSH_KEY_CTRLC 3
 #define MSH_KEY_ESC 0x1b
 #define MSH_KEY_TAB   9
 #define MSH_KEY_ENTER 0x0a
 #define MSH_KEY_SPACE 0x20
 #define MSH_KEY_SQUAE 91
 #define MSH_KEY_WAVE  126
+#define MSH_KEY_BACKSPACE0  8
 #define MSH_KEY_BACKSPACE  127
 
 
 static msh_shell msh_instance;
-
+static int msh_run = 1;
 
 static void msh_cfg_termsetting(void)
 {
@@ -353,6 +355,15 @@ static int msh_backspace(void){
     return 0;
 }
 
+static int msh_ctrlc(void)
+{
+    msh_instance.edit_buff[0] = MSH_KEY_CTRLC;
+    msh_instance.edit_buff[1] = '\0';
+    msh_instance.edit_cursor  = 0;
+
+    return 0;
+}
+
 /*
  * Delete one character
  * 'abcde'  'abde'
@@ -553,26 +564,35 @@ LINE_END_STATUS msh_getcmd(char* cmdstring){
         
         /* get one char */
         key = msh_getchar(0);
-        if (is_printful(key)){
-           
+        if (is_printful(key))
+        {   
             err = msh_insert((char)key);
         }
-        else if (MSH_KEY_ESC == key){
-            
+        else if (MSH_KEY_ESC == key)
+        {    
             err = msh_esc_mux();
         }
-        else if (MSH_KEY_BACKSPACE == key){
+        else if ((MSH_KEY_BACKSPACE == key) || (MSH_KEY_BACKSPACE0 == key))
+        {
             err = msh_backspace();
         }
-        else if (MSH_KEY_TAB == key){
+        else if (MSH_KEY_TAB == key)
+        {
             end = END_WITH_TAB;
             break;
         }
-        else if (MSH_KEY_ENTER == key){
+        else if (MSH_KEY_ENTER == key)
+        {
             end = END_WITH_ENTER;
             break;
         }
-
+        else if (MSH_KEY_CTRLC == key)
+        {
+            end = END_WITH_CTRLC;
+            err = msh_ctrlc();
+            break;
+        }
+        
         if (0 != err) 
         {
             term_bell();
@@ -614,16 +634,45 @@ static void msh_resetbuff(void){
     return;
 }
 
+static void msh_preprocess(char* usr_input)
+{
+    char* ptr = usr_input;
+    int i;
+
+    while(*ptr == ' ')
+    {
+        ptr++;
+    }
+
+    i = 0;
+    while(*ptr != '\0')
+    {
+        usr_input[i] = *ptr++;
+        while((usr_input[i] == ' ') && (*ptr == ' '))
+        {
+            ptr++;
+        }
+        i++;
+    }
+
+    usr_input[i] = '\0';
+
+    return;
+}
+
 static LINE_PROCESS_RESULT msh_process(LINE_END_STATUS end, char* usr_input)
 {
+    msh_preprocess(usr_input);
+
     if (end == END_WITH_TAB)
     {
-        // printf("\nhello");
-        
-        
-        cmd_help(usr_input);
+        cmd_tab(usr_input);
     
         return PROCESS_REDISPLAY;
+    }
+    else if (end == END_WITH_ENTER)
+    {
+        cmd_exec(usr_input);
     }
 
     return PROCESS_CMD_EXEC;
@@ -693,22 +742,26 @@ void msh_startshell(void){
         
         result = msh_process(end, usr_input);
         
-    }while(result != PROCESS_QUIT);
+    }while(msh_run);
+
+    return;
+}
+
+void msh_stopshell(void)
+{
+    msh_run = 0;
 
     return;
 }
 
 
 unsigned long msh_init(void){
-    unsigned  long i;
-    unsigned  long ulRetCode;
 
     (void)memset(&msh_instance, 0, sizeof(msh_shell));
 
     msh_setprompt("msh > ");
 
     term_save_setting(&msh_instance.termios_backup);
-    
     
     msh_cfg_termsetting();
 

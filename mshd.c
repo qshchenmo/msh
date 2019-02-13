@@ -2,14 +2,16 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "core.h"
-#include "cmd_tree.h"
+#include "shell.h"
+#include "cmd.h"
+#include "internal.h"
 
 int main(int argc, char* argv[]){
 
     cmd_tree_init();
 
-    test_cmd();
+    /* register internal command */
+    internal_cmd_register();
     
     /* Terminal Subsystem Init */    
     msh_init();
