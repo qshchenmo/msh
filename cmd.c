@@ -4,14 +4,16 @@
 #include "list.h"
 #include "cont.h"
 #include "cmd.h"
+#include "err.h"
 
-#define CMD_NAME_SIZE 16
+#define CMD_NAME_SIZE  16
+#define CMD_VALUE_SIZE 16
+#define CMD_HELP_SIZE 32
 #define CMD_OPTION_MAX 16
 #define CMD_KEYWORD_MAX 8
 
 #define CMD_NODE_F_ROOT (1<<0)   /* root node */
 #define CMD_NODE_F_LAST (1<<1)   /* this node is the last node in one command */
-
 
 typedef enum
 {
@@ -29,6 +31,7 @@ typedef enum
 struct cmd_keyword
 {
     char name[CMD_NAME_SIZE];
+    char helpstr[CMD_HELP_SIZE];
 };
 
 struct cmd_keywords
@@ -63,12 +66,26 @@ struct cmd_ctx
 struct cmd_node
 {
     char name[CMD_NAME_SIZE]; 
+    char helpstr[CMD_HELP_SIZE];
     struct cmd_node* parent;
     struct msh_list_item self;
     struct msh_list child;
     int flag;
     struct cmd_options *opts; /* only valid when this node is last node */
     cmd_handler handler;      /* only valid when this node is last node */
+};
+
+struct cmd_opt_pair
+{
+    char opt_name[CMD_NAME_SIZE]; 
+    char opt_value[CMD_VALUE_SIZE];
+};
+
+
+struct cmd_opt_pairs
+{
+    struct cmd_opt_pair opts[CMD_OPTION_MAX];
+    int nr;
 };
 
 /* global cmd tree root */
@@ -78,7 +95,7 @@ static struct cmd_node* root = NULL;
 /*
  * Create a new node 
  */
-static struct cmd_node* cmd_node_create(char* name)
+static struct cmd_node* cmd_node_create(struct cmd_keyword* kw)
 {
     struct cmd_node* n = NULL;
 
@@ -92,9 +109,14 @@ static struct cmd_node* cmd_node_create(char* name)
 
     msh_list_item_init(&n->self);
     
-    if (NULL != name)
+    if (NULL != kw->name)
     {
-        memcpy(n->name, name, strlen(name));
+        memcpy(n->name, kw->name, strlen(kw->name));
+    }
+
+    if (NULL != kw->helpstr)
+    {
+        memcpy(n->helpstr, kw->helpstr, strlen(kw->helpstr));     
     }
     
     msh_list_init(&n->child);
@@ -237,16 +259,20 @@ void cmd_ctx_destroy(void* _ctx)
  * define command keyword
  * eg.
  */
-void cmd_def_keyword(char* name, void* _ctx)
+void cmd_def_keyword(char* name, void* _ctx, char* helpstr)
 {
     struct cmd_ctx* ctx = (struct cmd_ctx*)_ctx;
     
-    if (ctx->err != 0)
+    if (ctx->err != MSH_ERROR_SUCCESS)
     {
         return;
     }    
 
-    /* FIXME: help infomation */   
+    if ((NULL == name) || (NULL == helpstr))
+    {
+        ctx->err = MSH_ERROR_FAILED;
+        return;
+    }
 
     if (ctx->keywords == NULL)
     {
@@ -258,7 +284,8 @@ void cmd_def_keyword(char* name, void* _ctx)
     struct cmd_keyword *keyword = &ctx->keywords->keyword[ctx->keywords->nr++];
 
     memcpy(keyword->name, name, strlen(name));
-
+    memcpy(keyword->helpstr, helpstr, strlen(helpstr));
+    
     return;
 }
 
@@ -268,7 +295,7 @@ void cmd_def_keyword(char* name, void* _ctx)
 void cmd_def_option(char* name, int required, void* _ctx)
 {
     struct cmd_ctx* ctx = (struct cmd_ctx*)_ctx;
-    if (ctx->err != 0)
+    if (ctx->err != MSH_ERROR_SUCCESS)
     {
         return;
     }    
@@ -318,7 +345,7 @@ void cmd_register(void* _ctx, cmd_handler handler)
     for (j = i; j < ctx->keywords->nr; j++)
     {
         /* create new cmd_node*/
-        n = cmd_node_create(ctx->keywords->keyword[j].name);
+        n = cmd_node_create(&ctx->keywords->keyword[j]);
         
         msh_list_insert(&r->child, &n->self, NULL);
 
@@ -424,7 +451,14 @@ static void cmd_help_keyword(struct cmd_node* r, char* condition)
         n = msh_cont (it, struct cmd_node, self);
         if (0 == strncmp(n->name, condition, strlen(condition))) 
         {
-            printf("\n%s", n->name);
+            if (strlen(n->name) < 8)
+            {
+                printf("\n  %-8s %s", n->name, n->helpstr);    
+            }
+            else
+            {
+                printf("\n  %-16s %s", n->name, n->helpstr);  
+            }
         }
     }
 
@@ -485,29 +519,32 @@ void cmd_tab(char* input)
     return;
 }
 
-static LINE_PROCESS_RESULT cmd_exec_opt(struct cmd_node* s, char* input, int offset)
+static int cmd_exec_opt(struct cmd_node* s, char* input, int offset)
 {
-    LINE_PROCESS_RESULT ret = PROCESS_CMD_EXEC;
+    int err = MSH_ERROR_SUCCESS;
+    struct cmd_opt_pairs opt_pairs;
     void* ctx = NULL;
+
+    bzero(&opt_pairs, sizeof(opt_pairs));
     
     if (NULL == s->opts)    
     {
-        s->handler(ctx);
+        err = s->handler(ctx);
     }
 
-    return ret;
+    return err;
 }
 
 /*
  * try exec one command
  */
-LINE_PROCESS_RESULT cmd_exec(char* input)
+int cmd_exec(char* input)
 {
     char buf[CMD_NAME_SIZE];
     int offset = 0;
     struct cmd_node* r = root;
     struct cmd_node* s;
-    LINE_PROCESS_RESULT ret = PROCESS_CMD_EXEC;
+    int err = MSH_ERROR_SUCCESS;
     
     for(;;)
     {
@@ -521,7 +558,7 @@ LINE_PROCESS_RESULT cmd_exec(char* input)
             if (s->flag & CMD_NODE_F_LAST)
             {
                 /* command is matched */
-                ret = cmd_exec_opt(s, input, offset);
+                err = cmd_exec_opt(s, input, offset);
 
                 break;
             }
@@ -533,18 +570,24 @@ LINE_PROCESS_RESULT cmd_exec(char* input)
         }
         else
         {
-            ret = PROCESS_CMD_NOTFOUND;
+            err = MSH_ERROR_NOTFOUND;
             break;
         }
     }
     
-    return ret;    
+    return err;    
 }
 
 int cmd_tree_init(void)
 {  
+    struct cmd_keyword root_kw = {
+        .name = "root",
+        .helpstr = "help root",
+    
+    };
+    
     /* create root element */
-    root = cmd_node_create("root");
+    root = cmd_node_create(&root_kw);
     if (NULL == root)
     {
         return -1;

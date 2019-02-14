@@ -10,6 +10,7 @@
 
 #include "msh_term.h"
 #include "cmd.h"
+#include "err.h"
 
 typedef enum{
     ESC_UNKNOW,
@@ -25,14 +26,6 @@ typedef enum{
     END_WITH_TAB,
     END_WITH_CTRLC,
 }LINE_END_STATUS;
-
-typedef enum{
-    PROCESS_CMD_EXEC,
-    PROCESS_CMD_NOTFOUND,
-    PROCESS_REDISPLAY,
-    PROCESS_QUIT
-}LINE_PROCESS_RESULT;
-
 
 
 
@@ -64,7 +57,6 @@ typedef struct
 
 
 static msh_shell msh_instance;
-static int msh_run = 1;
 
 static void msh_cfg_termsetting(void)
 {
@@ -257,24 +249,24 @@ static int msh_left()
 {
     if (0 == msh_instance.edit_cursor)
     {
-        return -1;
+        return MSH_ERROR_FAILED;
     }
 
     msh_instance.edit_cursor--;
 
-    return 0;
+    return MSH_ERROR_SUCCESS;
 }
 
 static int msh_right()
 {
     if (msh_instance.edit_cursor >= msh_instance.edit_end)
     {
-        return -1;
+        return MSH_ERROR_FAILED;
     }
 
     msh_instance.edit_cursor++;
 
-    return 0;
+    return MSH_ERROR_SUCCESS;
 }
 
 
@@ -312,7 +304,7 @@ static void msh_loadtext(char *pcString)
 static int msh_insert(char c){
 
     if (msh_instance.edit_end == MSH_BUF_SIZE){
-        return -1;
+        return MSH_ERROR_FAILED;
     }
 
     if (msh_instance.edit_cursor != msh_instance.edit_end){
@@ -329,7 +321,7 @@ static int msh_insert(char c){
 
     msh_instance.edit_buff[msh_instance.edit_end] = '\0';
 
-    return 0;
+    return MSH_ERROR_SUCCESS;
 }
 
 /*
@@ -338,7 +330,7 @@ static int msh_insert(char c){
 static int msh_backspace(void){
 
     if (msh_instance.edit_cursor == 0){
-        return -1;
+        return MSH_ERROR_FAILED;
     }
 
     if (msh_instance.edit_cursor != msh_instance.edit_end){
@@ -352,7 +344,7 @@ static int msh_backspace(void){
     msh_instance.edit_cursor--;
     msh_instance.edit_end--;
 
-    return 0;
+    return MSH_ERROR_SUCCESS;
 }
 
 static int msh_ctrlc(void)
@@ -361,7 +353,7 @@ static int msh_ctrlc(void)
     msh_instance.edit_buff[1] = '\0';
     msh_instance.edit_cursor  = 0;
 
-    return 0;
+    return MSH_ERROR_SUCCESS;
 }
 
 /*
@@ -372,7 +364,7 @@ static int msh_ctrlc(void)
 static int msh_delete(void){
 
     if (msh_instance.edit_cursor >= msh_instance.edit_end){
-        return -1;
+        return MSH_ERROR_FAILED;
     }
 
     (void) memmove(&msh_instance.edit_buff[msh_instance.edit_cursor], 
@@ -381,7 +373,7 @@ static int msh_delete(void){
 
     msh_instance.edit_end--;
 
-    return 0;
+    return MSH_ERROR_SUCCESS;
 }
 
 
@@ -393,7 +385,7 @@ static int msh_delete(void){
 static int msh_esc_mux(void)
 {
     int key;
-    int ret = -1;
+    int ret = MSH_ERROR_FAILED;
 
     key = msh_getchar(3);
     if (MSH_KEY_SQUAE == key)
@@ -405,7 +397,7 @@ static int msh_esc_mux(void)
         if (('b' != key) && ('d' != key) && ('f' != key))
         {
             msh_getchar_untilEOF();
-            return -1;
+            return MSH_ERROR_FAILED;
         }
     }
 
@@ -451,7 +443,7 @@ static int msh_esc_mux(void)
         }
     }
 
-    if (-1 == ret)
+    if (MSH_ERROR_FAILED == ret)
         msh_getchar_untilEOF();
 
     return ret;
@@ -552,7 +544,7 @@ static void msh_refresh(void){
  */
 LINE_END_STATUS msh_getcmd(char* cmdstring){
     int key;
-    int err = -1;
+    int err = MSH_ERROR_FAILED;
     LINE_END_STATUS end = END_WITH_ENTER;
     
     for (;;){
@@ -560,7 +552,7 @@ LINE_END_STATUS msh_getcmd(char* cmdstring){
         /* display screen */
         msh_refresh();
 
-        err = -1;
+        err = MSH_ERROR_FAILED;
         
         /* get one char */
         key = msh_getchar(0);
@@ -593,7 +585,7 @@ LINE_END_STATUS msh_getcmd(char* cmdstring){
             break;
         }
         
-        if (0 != err) 
+        if (MSH_ERROR_SUCCESS != err) 
         {
             term_bell();
         }
@@ -660,76 +652,42 @@ static void msh_preprocess(char* usr_input)
     return;
 }
 
-static LINE_PROCESS_RESULT msh_process(LINE_END_STATUS end, char* usr_input)
+static int msh_process(LINE_END_STATUS end, char* usr_input)
 {
+    int err = MSH_ERROR_SUCCESS;
+    
     msh_preprocess(usr_input);
 
     if (end == END_WITH_TAB)
     {
         cmd_tab(usr_input);
     
-        return PROCESS_REDISPLAY;
+        return err;
     }
     else if (end == END_WITH_ENTER)
     {
-        cmd_exec(usr_input);
+        err = cmd_exec(usr_input);
     }
 
-    return PROCESS_CMD_EXEC;
-
-    /*
-    unsigned ulCmdBufLen;
-    unsigned ulRet = 0;
-    char cEndChar;
-
-    ulCmdBufLen = strlen(pcCmdString);
-    cEndChar = pcCmdString[ulCmdBufLen - 1];
-
-
-    if (COMSH_KEY_TAB != cEndChar)
-    {
-
-    }
-
-    switch (cEndChar){
-        case  COMSH_KEY_CTRL_Z:
-        {
-            printf("\r\n");
-            ProcCtrlZ();
-            break;
-        }
-        case COMSH_KEY_TAB:
-        {
-            printf("\r\n");
-            {
-                pcCmdString[ulCmdBufLen - 1] = '\0';
-                COMSH_LINE_SetCmdString(pcCmdString);
-            }
-            break;
-        }
-        default:
-            break;
-    }
-    */
+    return err;
 }
 
-
-
-
-
-
+/*
+ * start mshell
+ */
 void msh_startshell(void){
 
-    char usr_input[256];
+    char usr_input[MSH_BUF_SIZE];
     LINE_END_STATUS end;
-    LINE_PROCESS_RESULT result = PROCESS_CMD_EXEC;
+    int err;
+    
     do{
 
         msh_prompt();
 
         msh_resetbuff();
         
-        if (PROCESS_REDISPLAY == result)
+        if (END_WITH_TAB == end)
         {
             msh_loadtext(usr_input);
         }
@@ -740,32 +698,24 @@ void msh_startshell(void){
         
         end = msh_getcmd(usr_input);
         
-        result = msh_process(end, usr_input);
+        err = msh_process(end, usr_input);
         
-    }while(msh_run);
+    }while(err != MSH_ERROR_QUIT);
 
     return;
 }
-
-void msh_stopshell(void)
-{
-    msh_run = 0;
-
-    return;
-}
-
 
 unsigned long msh_init(void){
 
     (void)memset(&msh_instance, 0, sizeof(msh_shell));
 
-    msh_setprompt("msh > ");
+    msh_setprompt("msh # ");
 
     term_save_setting(&msh_instance.termios_backup);
     
     msh_cfg_termsetting();
 
-    return 0;
+    return MSH_ERROR_SUCCESS;
 }
 
 
