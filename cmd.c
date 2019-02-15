@@ -42,7 +42,9 @@ struct cmd_keywords
 
 struct cmd_option
 {
-    int name[CMD_NAME_SIZE];
+    char name[CMD_NAME_SIZE];
+    int nopara;
+    int id;
     int required;
 };
 
@@ -77,15 +79,16 @@ struct cmd_node
 
 struct cmd_opt_pair
 {
-    char opt_name[CMD_NAME_SIZE]; 
+    int opt_id; 
     char opt_value[CMD_VALUE_SIZE];
 };
 
 
-struct cmd_opt_pairs
+struct cmd_exec_ctx
 {
     struct cmd_opt_pair opts[CMD_OPTION_MAX];
     int nr;
+    int step;
 };
 
 /* global cmd tree root */
@@ -292,7 +295,7 @@ void cmd_def_keyword(char* name, void* _ctx, char* helpstr)
 /*
  * define option
  */
-void cmd_def_option(char* name, int required, void* _ctx)
+void cmd_def_option(char* name, int id, int required, int nopara, void* _ctx)
 {
     struct cmd_ctx* ctx = (struct cmd_ctx*)_ctx;
     if (ctx->err != MSH_ERROR_SUCCESS)
@@ -311,6 +314,8 @@ void cmd_def_option(char* name, int required, void* _ctx)
     memcpy(opt->name, name, strlen(name));
 
     opt->required = required;
+    opt->id = id;
+    opt->nopara= nopara;
 
     return;
 }
@@ -519,19 +524,90 @@ void cmd_tab(char* input)
     return;
 }
 
+static struct cmd_option *cmd_search_opt(struct cmd_node* s, char* name)
+{
+    struct cmd_option* opt = NULL;
+    int i;
+
+    for(i = 0; i < s->opts->nr; i++)
+    {
+        if (0 == strcmp(s->opts->opt[i].name, name))
+        {
+            opt = &s->opts->opt[i];
+            break;
+        }
+    }
+
+    return opt;
+}
+
+void* cmd_getpara(void* ctx, int* id)
+{
+    char* para = NULL;
+    struct cmd_exec_ctx* exec_ctx;
+
+    exec_ctx = (struct cmd_exec_ctx*)ctx;
+
+    if (exec_ctx->step >= exec_ctx->nr)
+    {
+        return NULL;
+    }
+
+    *id = exec_ctx->opts[exec_ctx->step].opt_id;
+    para = exec_ctx->opts[exec_ctx->step].opt_value;
+
+    exec_ctx->step++;
+
+    return para;
+}
+
 static int cmd_exec_opt(struct cmd_node* s, char* input, int offset)
 {
     int err = MSH_ERROR_SUCCESS;
-    struct cmd_opt_pairs opt_pairs;
-    void* ctx = NULL;
+    struct cmd_exec_ctx exec_ctx;
+    int inputlen = strlen(input);
+    struct cmd_option* opt;
+    char buf[CMD_NAME_SIZE];
 
-    bzero(&opt_pairs, sizeof(opt_pairs));
+    bzero(&exec_ctx, sizeof(exec_ctx));
     
-    if (NULL == s->opts)    
+    while(offset <= inputlen)
     {
-        err = s->handler(ctx);
+        bzero(buf, CMD_NAME_SIZE);
+        cmd_parse_input(input, &offset, buf);
+
+        if ('\0' == buf[0])
+        {
+            break;
+        }
+
+        opt = cmd_search_opt(s, buf);
+        if (NULL == opt)
+        {
+            err = MSH_ERROR_INVALID_OPT;
+            goto err_out;
+        }
+
+        exec_ctx.opts[exec_ctx.nr].opt_id = opt->id;
+        if (!opt->nopara)
+        {
+            bzero(buf, CMD_NAME_SIZE);
+            cmd_parse_input(input, &offset, buf);
+            if ('\0' == buf[0])
+            {
+                err = MSH_ERROR_INCOMPLETE_OPT;
+                goto err_out;
+            }           
+            memcpy(exec_ctx.opts[exec_ctx.nr].opt_value, buf, strlen(buf));
+        }
+
+        exec_ctx.nr++;
     }
 
+    err = s->handler((void*)&exec_ctx);
+
+err_out:
+    
     return err;
 }
 

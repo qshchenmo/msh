@@ -84,31 +84,6 @@ static void msh_cfg_termsetting(void)
     return;
 }
 
-
-
-void COMSH_LINE_MaskSpecKey(void)
-{
-    
-    int fd = fileno(stdin);
-    struct termios stNewTermios;
-    int iStatus;
-
-    iStatus = tcgetattr(fd, &stNewTermios);
-
-    if (0 == iStatus)
-    {
-    
-    stNewTermios.c_cc[VSUSP] = _POSIX_VDISABLE;
-     stNewTermios.c_cc[VSTART] = _POSIX_VDISABLE;
-     stNewTermios.c_cc[VSTOP] = _POSIX_VDISABLE;
-     stNewTermios.c_cc[VQUIT] = _POSIX_VDISABLE;
-        term_settermios(fd,&stNewTermios);
-    }
-
-    return;
-}
-
-
 static void msh_cursor_move(unsigned int src, unsigned int dst){
     unsigned int colomn = term_getcol();
     unsigned int srcline, dstline, ulStartCols, ulEndCols;
@@ -156,23 +131,6 @@ static void msh_printf(char* pcStr){
     return;
 }
 
-/*
-static void msh_display(char *pcStr, unsigned long ulStartCols){
-    unsigned long ulScrColumns;
-    unsigned long ulPermitLenth;
-
-    
-}
-
-
-
-void LINE_Set_SyncInput(int bSync)
-{
-    g_bComsh_SynInput = bSync;
-    return;
-}
-*/
-
 void msh_prompt(void)
 {
     printf("\n");
@@ -184,28 +142,6 @@ void msh_prompt(void)
   
     return;
 }
-
-/*    
-static void LINE_SyncInput(void){
-    msh_shell *pstComshLine;
-
-    if (0 == g_bComsh_SynInput)
-        return;
-
-    pstComshLine = &msh_instance;
-
-    if(pstComshLine->edit_buff[0]!=0){
-        printf("\r\n");
-        msh_prompt();
-        msh_printf(pstComshLine->edit_buff);
-        msh_cursor_move(pstComshLine->edit_end,pstComshLine->edit_cursor);
-    }
-
-    g_bComsh_SynInput = 0;
-
-    return;
-}
-*/
 
 /*
  * read one byte from usr
