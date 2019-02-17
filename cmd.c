@@ -3,7 +3,9 @@
 #include <string.h>
 #include "list.h"
 #include "cont.h"
+#include "api.h"
 #include "cmd.h"
+#include "pub.h"
 #include "err.h"
 
 #define CMD_NAME_SIZE  16
@@ -654,12 +656,67 @@ int cmd_exec(char* input)
     return err;    
 }
 
-int cmd_tree_init(void)
+static int cmd_quit_handler(void* ctx)
+{
+    printf("\n bye bye~\n");
+    return MSH_ERROR_QUIT;
+}
+
+static void cmd_quit_install(void)
+{
+    void* ctx = NULL;
+
+    ctx = cmd_ctx_create();
+
+    cmd_def_keyword("quit", ctx, "quit mini shell");
+
+    cmd_register(ctx, cmd_quit_handler);
+    
+    cmd_ctx_destroy(ctx);
+
+    return;
+}
+
+
+static int cmd_version_handler(void* ctx)
+{
+    printf("\n  mini shell version %d.%d", MSH_VERSION_MAJOR, MSH_VERSION_MINOR);
+    return MSH_ERROR_SUCCESS;
+}
+
+static void cmd_version_install(void)
+{
+    void* ctx = NULL;
+
+    ctx = cmd_ctx_create();
+
+    cmd_def_keyword("version", ctx, "show mini shell");
+
+    cmd_register(ctx, cmd_version_handler);
+    
+    cmd_ctx_destroy(ctx);
+
+    return;
+}
+
+static void cmd_internal_register(void)
+{   
+    cmd_quit_install();
+
+    cmd_version_install();
+
+    return;
+}
+
+
+/*
+ * init cmd tree
+ */
+int cmd_init(void)
 {  
     struct cmd_keyword root_kw = {
         .name = "root",
         .helpstr = "help root",
-    
     };
     
     /* create root element */
@@ -670,6 +727,8 @@ int cmd_tree_init(void)
     }
 
     root->flag |= CMD_NODE_F_ROOT;
+
+    cmd_internal_register();
     
     return 0;
 }

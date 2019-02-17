@@ -31,7 +31,7 @@ typedef enum{
 
 #define MSH_BUF_SIZE     256
 #define MSH_PROMPT_SIZE  16
-
+#define MSH_HISTORY_SIZE 64
 typedef struct
 {
     char last_buff[MSH_BUF_SIZE];
@@ -45,6 +45,14 @@ typedef struct
     struct termios termios_backup;
 }msh_shell;
 
+typedef struct 
+{
+    char history[MSH_HISTORY_SIZE][MSH_BUF_SIZE];
+    int cur;         /* current position    */
+    int next;        /* next write position */
+    int used;        /* saved input, must <= MSH_HISTORY_SIZE */
+}msh_history;
+
 #define MSH_KEY_CTRLC 3
 #define MSH_KEY_ESC 0x1b
 #define MSH_KEY_TAB   9
@@ -57,7 +65,8 @@ typedef struct
 
 
 static msh_shell msh_instance;
-
+static msh_history msh_his;
+    
 static void msh_cfg_termsetting(void)
 {
     struct termios stNewTermios;
@@ -181,55 +190,19 @@ static void msh_getchar_untilEOF(void)
     return;
 }
 
-static int msh_left()
-{
-    if (0 == msh_instance.edit_cursor)
-    {
-        return MSH_ERROR_FAILED;
-    }
-
-    msh_instance.edit_cursor--;
-
-    return MSH_ERROR_SUCCESS;
-}
-
-static int msh_right()
-{
-    if (msh_instance.edit_cursor >= msh_instance.edit_end)
-    {
-        return MSH_ERROR_FAILED;
-    }
-
-    msh_instance.edit_cursor++;
-
-    return MSH_ERROR_SUCCESS;
-}
-
 
 static void msh_loadtext(char *pcString)
 {
     size_t len;
-    unsigned int dst;
 
     len = strlen(pcString);
 
-    dst = msh_instance.edit_cursor + len;
+    bzero(msh_instance.edit_buff, sizeof(msh_instance.edit_buff));
 
-    if (msh_instance.edit_cursor < msh_instance.edit_end)
-    {
-        (void) memmove(&msh_instance.edit_buff[dst],  
-                       &msh_instance.edit_buff[msh_instance.edit_cursor],  
-                       (size_t)((msh_instance.edit_end + 1) - msh_instance.edit_cursor));
-    }
-    else 
-    {
-        msh_instance.edit_buff[dst] = '\0';
-    }
+    (void)memcpy(&msh_instance.edit_buff[0], pcString, len);
 
-    (void)memcpy(&msh_instance.edit_buff[msh_instance.edit_cursor], pcString, len);
-
-    msh_instance.edit_end += len;
-    msh_instance.edit_cursor += len;
+    msh_instance.edit_end = len;
+    msh_instance.edit_cursor = len;
 
     return;
 }
@@ -239,7 +212,8 @@ static void msh_loadtext(char *pcString)
  */
 static int msh_insert(char c){
 
-    if (msh_instance.edit_end == MSH_BUF_SIZE){
+    if (msh_instance.edit_end == (MSH_BUF_SIZE - 1))
+    {
         return MSH_ERROR_FAILED;
     }
 
@@ -258,6 +232,19 @@ static int msh_insert(char c){
     msh_instance.edit_buff[msh_instance.edit_end] = '\0';
 
     return MSH_ERROR_SUCCESS;
+}
+
+static void msh_resetbuff(void){
+    msh_instance.edit_buff[0] = '\0';
+    msh_instance.edit_end = 0;
+    msh_instance.edit_cursor = 0;
+
+
+    msh_instance.last_buff[0] = '\0';
+    msh_instance.last_cursor = 0;
+    msh_instance.last_end = 0;
+
+    return;
 }
 
 /*
@@ -310,79 +297,6 @@ static int msh_delete(void){
     msh_instance.edit_end--;
 
     return MSH_ERROR_SUCCESS;
-}
-
-
-/*
- *  ESC multiplexer 
- *  return  0: success
- *         -1: fail
- */
-static int msh_esc_mux(void)
-{
-    int key;
-    int ret = MSH_ERROR_FAILED;
-
-    key = msh_getchar(3);
-    if (MSH_KEY_SQUAE == key)
-    {
-        key = msh_getchar(1);
-    }
-    else
-    {
-        if (('b' != key) && ('d' != key) && ('f' != key))
-        {
-            msh_getchar_untilEOF();
-            return MSH_ERROR_FAILED;
-        }
-    }
-
-    switch (key)
-    {
-        case 'A' :
-        {
-            /* up */
-            ret = 0;
-            break;
-        }
-        case 'B' :
-        {
-            /* down */
-            ret = 0;
-            break;
-        }
-        case 'C':
-        {
-            /* right */
-            ret = msh_right();
-            break;
-        }
-        case 'D':
-        {
-            /* left  */
-            ret = msh_left();
-            break;
-        }
-        case '3':
-        {
-            key = msh_getchar(1);
-            if (MSH_KEY_WAVE == key)
-            {
-                ret = msh_delete();
-            }
-            break;
-        }
-        default:
-        {
-             
-             break;
-        }
-    }
-
-    if (MSH_ERROR_FAILED == ret)
-        msh_getchar_untilEOF();
-
-    return ret;
 }
 
 static int is_printful(int key){
@@ -475,6 +389,134 @@ static void msh_refresh(void){
     return;
 } 
 
+static int msh_up(void)
+{        
+    if (msh_his.cur == msh_his.next)
+    {
+        /* temp save editing buf */
+        memcpy(msh_his.history[msh_his.next], msh_instance.edit_buff, MSH_BUF_SIZE);
+    }
+    
+    if (((msh_his.used < MSH_HISTORY_SIZE) && (msh_his.cur > 0)) ||
+        ((msh_his.used == MSH_HISTORY_SIZE) && ((msh_his.cur - 1 + MSH_HISTORY_SIZE) % MSH_HISTORY_SIZE != msh_his.next))
+       )
+    {
+        msh_his.cur = (msh_his.cur - 1 + MSH_HISTORY_SIZE) % MSH_HISTORY_SIZE;
+        msh_loadtext(msh_his.history[msh_his.cur]);
+    }
+    
+    return MSH_ERROR_SUCCESS;
+}
+
+static int msh_down(void)
+{
+    if (msh_his.cur == msh_his.next)
+    {
+        return MSH_ERROR_SUCCESS;   
+    }
+
+    msh_his.cur = (msh_his.cur + 1) % MSH_HISTORY_SIZE;
+    msh_loadtext(msh_his.history[msh_his.cur]);
+    
+    return MSH_ERROR_SUCCESS;
+}
+
+static int msh_left(void)
+{
+    if (0 == msh_instance.edit_cursor)
+    {
+        return MSH_ERROR_FAILED;
+    }
+
+    msh_instance.edit_cursor--;
+
+    return MSH_ERROR_SUCCESS;
+}
+
+static int msh_right(void)
+{
+    if (msh_instance.edit_cursor >= msh_instance.edit_end)
+    {
+        return MSH_ERROR_FAILED;
+    }
+
+    msh_instance.edit_cursor++;
+
+    return MSH_ERROR_SUCCESS;
+}
+
+/*
+ *  ESC multiplexer 
+ *  return  0: success
+ *         -1: fail
+ */
+static int msh_esc_mux(void)
+{
+    int key;
+    int ret = MSH_ERROR_FAILED;
+
+    key = msh_getchar(3);
+    if (MSH_KEY_SQUAE == key)
+    {
+        key = msh_getchar(1);
+    }
+    else
+    {
+        if (('b' != key) && ('d' != key) && ('f' != key))
+        {
+            msh_getchar_untilEOF();
+            return MSH_ERROR_FAILED;
+        }
+    }
+
+    switch (key)
+    {
+        case 'A' :
+        {
+            /* up */
+            ret = msh_up();
+            break;
+        }
+        case 'B' :
+        {
+            /* down */
+            ret = msh_down();
+            break;
+        }
+        case 'C':
+        {
+            /* right */
+            ret = msh_right();
+            break;
+        }
+        case 'D':
+        {
+            /* left  */
+            ret = msh_left();
+            break;
+        }
+        case '3':
+        {
+            key = msh_getchar(1);
+            if (MSH_KEY_WAVE == key)
+            {
+                ret = msh_delete();
+            }
+            break;
+        }
+        default:
+        {
+             
+             break;
+        }
+    }
+
+    if (MSH_ERROR_FAILED == ret)
+        msh_getchar_untilEOF();
+
+    return ret;
+}
+
 /*
  * Read one line, store it in @cmdstring
  */
@@ -549,16 +591,29 @@ void msh_setprompt(const char* prompt){
     return;
 }
 
-static void msh_resetbuff(void){
-    msh_instance.edit_buff[0] = '\0';
-    msh_instance.edit_end = 0;
-    msh_instance.edit_cursor = 0;
+static void msh_history_save(char* usr_input)
+{
+    if ('\0' == usr_input[0])
+    {
+        return;
+    }
 
+    bzero(msh_his.history[msh_his.next], MSH_BUF_SIZE);
+    
+    memcpy(msh_his.history[msh_his.next], usr_input, strlen(usr_input));
 
-    msh_instance.last_buff[0] = '\0';
-    msh_instance.last_cursor = 0;
-    msh_instance.last_end = 0;
-
+    msh_his.next++;
+    if (MSH_HISTORY_SIZE == msh_his.next)
+    {
+        msh_his.next = 0;
+    }
+    msh_his.cur = msh_his.next;
+    
+    if (MSH_HISTORY_SIZE > msh_his.used)
+    {
+        msh_his.used++;
+    }
+    
     return;
 }
 
@@ -602,6 +657,8 @@ static int msh_process(LINE_END_STATUS end, char* usr_input)
     }
     else if (end == END_WITH_ENTER)
     {
+        msh_history_save(usr_input);
+        
         err = cmd_exec(usr_input);
     }
 
@@ -633,7 +690,7 @@ void msh_startshell(void){
         fflush(stdout);
         
         end = msh_getcmd(usr_input);
-        
+  
         err = msh_process(end, usr_input);
         
     }while(err != MSH_ERROR_QUIT);
@@ -643,8 +700,10 @@ void msh_startshell(void){
 
 unsigned long msh_init(void){
 
-    (void)memset(&msh_instance, 0, sizeof(msh_shell));
+    bzero(&msh_instance, sizeof(msh_instance));
 
+    bzero(&msh_his, sizeof(msh_his));
+    
     msh_setprompt("msh # ");
 
     term_save_setting(&msh_instance.termios_backup);
