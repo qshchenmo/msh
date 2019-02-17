@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <dlfcn.h>
 #include "list.h"
 #include "cont.h"
 #include "api.h"
@@ -9,8 +10,8 @@
 #include "err.h"
 
 #define CMD_NAME_SIZE  16
-#define CMD_VALUE_SIZE 16
-#define CMD_HELP_SIZE 32
+#define CMD_VALUE_SIZE 48
+#define CMD_HELP_SIZE  32
 #define CMD_OPTION_MAX 16
 #define CMD_KEYWORD_MAX 8
 
@@ -332,7 +333,7 @@ void cmd_register(void* _ctx, cmd_handler handler)
     struct cmd_node* s;
     struct cmd_node* n;
     struct cmd_ctx* ctx = (struct cmd_ctx*)_ctx;
-    if ((0 != ctx->err) || (NULL == handler))
+    if ((0 != ctx->err) || (NULL == handler) || (NULL == ctx->keywords))
     {
         return;
     }
@@ -543,6 +544,13 @@ static struct cmd_option *cmd_search_opt(struct cmd_node* s, char* name)
     return opt;
 }
 
+void cmd_getpara_string(void* para, char buf[], int size)
+{
+    strncpy(buf, para, size);
+
+    return;
+}
+
 void* cmd_getpara(void* ctx, int* id)
 {
     char* para = NULL;
@@ -570,7 +578,8 @@ static int cmd_exec_opt(struct cmd_node* s, char* input, int offset)
     int inputlen = strlen(input);
     struct cmd_option* opt;
     char buf[CMD_NAME_SIZE];
-
+    char vbuf[CMD_VALUE_SIZE];
+    
     bzero(&exec_ctx, sizeof(exec_ctx));
     
     while(offset <= inputlen)
@@ -593,14 +602,14 @@ static int cmd_exec_opt(struct cmd_node* s, char* input, int offset)
         exec_ctx.opts[exec_ctx.nr].opt_id = opt->id;
         if (!opt->nopara)
         {
-            bzero(buf, CMD_NAME_SIZE);
-            cmd_parse_input(input, &offset, buf);
-            if ('\0' == buf[0])
+            bzero(vbuf, CMD_NAME_SIZE);
+            cmd_parse_input(input, &offset, vbuf);
+            if ('\0' == vbuf[0])
             {
                 err = MSH_ERROR_INCOMPLETE_OPT;
                 goto err_out;
             }           
-            memcpy(exec_ctx.opts[exec_ctx.nr].opt_value, buf, strlen(buf));
+            memcpy(exec_ctx.opts[exec_ctx.nr].opt_value, vbuf, strlen(vbuf));
         }
 
         exec_ctx.nr++;
@@ -708,6 +717,19 @@ static void cmd_internal_register(void)
     return;
 }
 
+static void cmd_external_scan(void)
+{
+    char *dlib_path = "./external/libtest.so";
+    
+    void *handle = dlopen(dlib_path, RTLD_LAZY);
+    if (!handle)
+    {
+        fprintf(stderr, "%s\n", dlerror());
+    }
+
+    return;    
+}
+
 
 /*
  * init cmd tree
@@ -729,6 +751,8 @@ int cmd_init(void)
     root->flag |= CMD_NODE_F_ROOT;
 
     cmd_internal_register();
+
+    cmd_external_scan();
     
     return 0;
 }

@@ -1,16 +1,15 @@
-SOURCE   = $(wildcard ./*.c)
+SOURCE   = $(wildcard ./src/*.c)
 OBJ      = $(patsubst %.c, %.o, $(SOURCE))
-INCLUDES = -I./h
-LIBS     = -lcurses
-#DEBUG    = -D_MACRO
-CFLAGS   = -Wall -c -g
+INCLUDES = -I ./inc
+LIBS     = -lcurses -ldl
+CFLAGS   = -Wall -c -g 
 TARGET   = mshd
 CC       = gcc
 
 $(TARGET): $(OBJ)	
-	$(CC) $(OBJ) $(LIB_PATH) $(LIBS) -o $(TARGET)
+	$(CC) -rdynamic $(OBJ) $(LIB_PATH) $(LIBS) -o $(TARGET)
 %.o: %.c
-	$(CC) $(INCLUDES) $(DEBUG) $(CFLAGS) $< -o $@
+	$(CC) $(INCLUDES) $(CFLAGS) $< -o $@
 .PHONY: clean
 clean:
 	rm -rf $(OBJ) $(TARGET) 

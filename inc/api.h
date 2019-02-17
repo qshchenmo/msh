@@ -1,8 +1,11 @@
 #ifndef MSH_CMDAPI_INCLUDED
 #define MSH_CMDAPI_INCLUDED
 
+#define MSH_INVALID_ID  (-1)
 
 typedef int (*cmd_handler)(void* ctx);
+
+void cmd_getpara_string(void* para, char buf[], int size);
 
 void* cmd_getpara(void* ctx, int* id);
 #define CMD_OPT_SCAN(ctx ,id, para) \
