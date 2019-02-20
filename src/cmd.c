@@ -1,10 +1,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <dirent.h>
 #include <dlfcn.h>
 #include "list.h"
 #include "cont.h"
-#include "api.h"
+#include "msh.h"
 #include "cmd.h"
 #include "pub.h"
 #include "err.h"
@@ -17,6 +20,10 @@
 
 #define CMD_NODE_F_ROOT (1<<0)   /* root node */
 #define CMD_NODE_F_LAST (1<<1)   /* this node is the last node in one command */
+
+#define FULLPATH_MAX_SIZE 256
+#define EXTERNAL_COMMAND_DIR  "/etc/mshd/external/"
+#define MSH_OPT_VALUEHINT_DEFAULT "value"
 
 typedef enum
 {
@@ -46,9 +53,10 @@ struct cmd_keywords
 struct cmd_option
 {
     char name[CMD_NAME_SIZE];
-    int nopara;
+    char helpstr[CMD_HELP_SIZE];
+    char valuehint[CMD_NAME_SIZE];
     int id;
-    int required;
+    int flag;
 };
 
 struct cmd_options
@@ -204,7 +212,9 @@ static int cmd_usage(struct cmd_node* r, char buf[])
 static void cmd_print_usage(struct cmd_node* r)
 {
     char buf[256];
-
+    int i;
+    int flag = 0;
+    
     if ((NULL == r) || !(r->flag & CMD_NODE_F_LAST))
     {
         return;
@@ -212,11 +222,25 @@ static void cmd_print_usage(struct cmd_node* r)
 
     bzero(buf, sizeof(buf));
 
+    printf("\n[usage] ");
     if (cmd_usage(r,buf) > 0)
     {
-        printf("\n%s", (char*)buf);
+        printf("%s", (char*)buf);
     }
 
+    for (i = 0; i < r->opts->nr; i++)
+    {
+        flag = r->opts->opt[i].flag;
+        if (flag & MSH_OPT_F_NOPARA)
+        {
+            printf(" [%s]", (char*)r->opts->opt[i].name);
+        }
+        else
+        {
+            printf(" [%s %s]", (char*)r->opts->opt[i].name, (char*)r->opts->opt[i].valuehint);
+        }
+    }
+    
     return;
 }
 
@@ -298,7 +322,7 @@ void cmd_def_keyword(char* name, void* _ctx, char* helpstr)
 /*
  * define option
  */
-void cmd_def_option(char* name, int id, int required, int nopara, void* _ctx)
+void cmd_def_option(char* name, int id, int flag, char* valuehint, void* _ctx, char* helpstr)
 {
     struct cmd_ctx* ctx = (struct cmd_ctx*)_ctx;
     if (ctx->err != MSH_ERROR_SUCCESS)
@@ -306,6 +330,12 @@ void cmd_def_option(char* name, int id, int required, int nopara, void* _ctx)
         return;
     }    
 
+    if ((NULL == name) || (NULL == helpstr))
+    {
+        ctx->err = MSH_ERROR_FAILED;
+        return;
+    }
+    
     if (ctx->opts == NULL)    
     {
         ctx->opts = (struct cmd_options*)malloc(sizeof(struct cmd_options));   
@@ -315,10 +345,22 @@ void cmd_def_option(char* name, int id, int required, int nopara, void* _ctx)
     struct cmd_option *opt = &ctx->opts->opt[ctx->opts->nr++];
     
     memcpy(opt->name, name, strlen(name));
+    memcpy(opt->helpstr, helpstr, strlen(helpstr));
 
-    opt->required = required;
+    if (!(flag & MSH_OPT_F_NOPARA))
+    {
+        if (valuehint)
+        {
+            memcpy(opt->valuehint, valuehint, strlen(valuehint));    
+        }
+        else
+        {
+            memcpy(opt->valuehint, MSH_OPT_VALUEHINT_DEFAULT, strlen(MSH_OPT_VALUEHINT_DEFAULT));  
+        }
+    }
+    
     opt->id = id;
-    opt->nopara= nopara;
+    opt->flag = flag;
 
     return;
 }
@@ -440,7 +482,14 @@ static void cmd_help_option(struct cmd_node* r)
         cmd_print_usage(r);
         for(i = 0; i < r->opts->nr; i++)
         {
-            printf("\n%s", (char*)r->opts->opt[i].name);
+            if (strlen(r->opts->opt[i].name) <= CMD_NAME_SIZE/2)
+            {
+                printf("\n %-8s %s", (char*)r->opts->opt[i].name, (char*)r->opts->opt[i].helpstr);
+            }
+            else
+            {
+                printf("\n %-16s %s", (char*)r->opts->opt[i].name, (char*)r->opts->opt[i].helpstr);
+            }
         }
     }
 
@@ -544,11 +593,14 @@ static struct cmd_option *cmd_search_opt(struct cmd_node* s, char* name)
     return opt;
 }
 
-void cmd_getpara_string(void* para, char buf[], int size)
+char* cmd_getpara_string(void* para)
 {
-    strncpy(buf, para, size);
+    return (char*)para;
+}
 
-    return;
+int cmd_getpara_interger(void* para)
+{
+    return atoi((char*)para);
 }
 
 void* cmd_getpara(void* ctx, int* id)
@@ -557,7 +609,6 @@ void* cmd_getpara(void* ctx, int* id)
     struct cmd_exec_ctx* exec_ctx;
 
     exec_ctx = (struct cmd_exec_ctx*)ctx;
-
     if (exec_ctx->step >= exec_ctx->nr)
     {
         return NULL;
@@ -600,7 +651,7 @@ static int cmd_exec_opt(struct cmd_node* s, char* input, int offset)
         }
 
         exec_ctx.opts[exec_ctx.nr].opt_id = opt->id;
-        if (!opt->nopara)
+        if (!(opt->flag & MSH_OPT_F_NOPARA))
         {
             bzero(vbuf, CMD_NAME_SIZE);
             cmd_parse_input(input, &offset, vbuf);
@@ -719,14 +770,46 @@ static void cmd_internal_register(void)
 
 static void cmd_external_scan(void)
 {
-    char *dlib_path = "./external/libtest.so";
-    
-    void *handle = dlopen(dlib_path, RTLD_LAZY);
-    if (!handle)
+    DIR* dir;
+    struct dirent* dentry;
+    struct stat sb;
+    void* handle;
+    char fullpath[FULLPATH_MAX_SIZE];
+
+    dir = opendir(EXTERNAL_COMMAND_DIR);
+    if (NULL == dir)
     {
-        fprintf(stderr, "%s\n", dlerror());
+        return;    
     }
 
+    for(dentry = readdir(dir); dentry != NULL; dentry = readdir(dir))
+    {
+        if (NULL == strstr(dentry->d_name, ".cli"))
+        {
+            continue;
+        }
+
+        bzero(fullpath, sizeof(fullpath));
+        sprintf(fullpath, "%s%s", EXTERNAL_COMMAND_DIR, dentry->d_name);
+
+        if (stat(fullpath, &sb) == -1)
+        {
+            perror("stat");
+            continue;
+        }
+
+        if (S_ISDIR(sb.st_mode))
+        {
+            continue;
+        }
+
+        handle = dlopen(fullpath, RTLD_LAZY);
+        if (!handle)
+        {
+            fprintf(stderr, "%s\n", dlerror());
+        }
+    }
+    
     return;    
 }
 

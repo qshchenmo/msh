@@ -1,11 +1,18 @@
 #ifndef MSH_CMDAPI_INCLUDED
 #define MSH_CMDAPI_INCLUDED
 
+#define MSH_USER_ERROR_SUCCESS          0
+#define MSH_USER_ERROR_FAILED         (-1)
+
+
 #define MSH_INVALID_ID  (-1)
+
+#define MSH_OPT_F_NOPARA   (1<<0)
 
 typedef int (*cmd_handler)(void* ctx);
 
-void cmd_getpara_string(void* para, char buf[], int size);
+char* cmd_getpara_string(void* para);
+int cmd_getpara_interger(void* para);
 
 void* cmd_getpara(void* ctx, int* id);
 #define CMD_OPT_SCAN(ctx ,id, para) \
@@ -23,7 +30,7 @@ void* cmd_ctx_create(void);
 void cmd_ctx_destroy(void* ctx);
 
 void cmd_def_keyword(char* name, void* _ctx, char* helpstr);
-void cmd_def_option(char* name, int id, int required, int nopara, void* _ctx);
+void cmd_def_option(char* name, int id, int flag, char* valuehint, void* _ctx, char* helpstr);
 
 #endif
 

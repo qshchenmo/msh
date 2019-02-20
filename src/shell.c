@@ -142,13 +142,11 @@ static void msh_printf(char* pcStr){
 
 void msh_prompt(void)
 {
-    printf("\n");
     if ('\0' != msh_instance.prompt_buff[0])
     {
         printf("%s", msh_instance.prompt_buff);
     }
-    
-  
+     
     return;
 }
 
@@ -665,6 +663,34 @@ static int msh_process(LINE_END_STATUS end, char* usr_input)
     return err;
 }
 
+static void msh_print_err(int err)
+{
+    switch(err)    
+    {
+        case (MSH_ERROR_NOTFOUND):
+        {
+            printf("  Command Not Found\n"); 
+            break;
+        }
+        case (MSH_ERROR_INVALID_OPT):
+        {
+            printf(" Invalid Input\n");
+            break;
+        }
+        case (MSH_ERROR_INCOMPLETE_OPT):
+        {
+            printf(" Incomplete Input\n");
+            break;
+        }
+        default:
+        {
+            break;
+        }
+    }
+
+    return;
+}
+
 /*
  * start mshell
  */
@@ -692,7 +718,10 @@ void msh_startshell(void){
         end = msh_getcmd(usr_input);
   
         err = msh_process(end, usr_input);
+
+        printf("\n"); 
         
+        msh_print_err(err);               
     }while(err != MSH_ERROR_QUIT);
 
     return;

@@ -1,13 +1,14 @@
 #include <stdio.h>
-#include "../inc/api.h"
-#include "../inc/err.h"
+#include "../inc/msh.h"
 
 #define OPT0 0
+#define OPT1 1
+#define OPT2 2
+#define OPT3 3
 
 static int test1_cmd_handler(void* ctx)
 {
     void* para = NULL;
-    char buf[32];
     int id = MSH_INVALID_ID;
     
     printf("this is test1 cmd handler\n");
@@ -18,18 +19,22 @@ static int test1_cmd_handler(void* ctx)
         {
             case OPT0:
             {
-                cmd_getpara_string(para, buf, 32);
-                printf("opt0 %s\n", (char*)buf);
+                printf("opt0 %s\n", cmd_getpara_string(para));
+                break;
+            }
+            case OPT1:
+            {
+                printf("opt1 %u\n", cmd_getpara_interger(para));
                 break;
             }
             default:
             {
-                return MSH_ERROR_INVALID_OPT;
+                return MSH_USER_ERROR_FAILED;
             }
         }
     }
     
-    return MSH_ERROR_SUCCESS;
+    return MSH_USER_ERROR_SUCCESS;
 }
 
 static void test1_cmd_install(void)
@@ -40,8 +45,10 @@ static void test1_cmd_install(void)
 
     cmd_def_keyword("test1", ctx, "test1_helper");    
 
-    cmd_def_option("opt0", OPT0, 0, 0, ctx);
-    
+    cmd_def_option("opt0", OPT0, 0, "string", ctx, "this is opt0's helpstr");
+
+    cmd_def_option("opt1", OPT1, 0, "interger", ctx, "this is opt1's helpstr");
+
     cmd_register(ctx, test1_cmd_handler);
 
     cmd_ctx_destroy(ctx);
