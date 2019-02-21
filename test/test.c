@@ -1,5 +1,5 @@
 #include <stdio.h>
-#include "../inc/msh.h"
+#include <msh.h>
 
 #define OPT0 0
 #define OPT1 1
