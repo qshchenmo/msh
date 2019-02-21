@@ -728,7 +728,7 @@ static void cmd_quit_install(void)
 
     ctx = cmd_ctx_create();
 
-    cmd_def_keyword("quit", ctx, "quit mini shell");
+    cmd_def_keyword("quit", ctx, "quit msh");
 
     cmd_register(ctx, cmd_quit_handler);
     

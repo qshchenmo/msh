@@ -221,3 +221,19 @@ static int test1_cmd_handler(void* ctx)
 }
 ```
 
+#### 效果
+
+```bash
+msh # 
+  quit     quit msh
+  version  show msh version
+  test1    test1_helper
+msh # tes
+msh # test1 
+[usage] test1  [opt0 string] [opt1 interger]
+ opt0     this is opt0's helpstr
+ opt1     this is opt1's helpstr
+msh # test1 
+
+```
+
