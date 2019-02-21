@@ -3,7 +3,7 @@ OBJ      = $(patsubst %.c, %.o, $(SOURCE))
 INCLUDES = -I ../inc
 TARGET   = libtest.cli
 CFLAGS	 = -Wall -c -g
-EXDIR    = /etc/mshd/external
+EXDIR    = /etc/msh/external
 CC       = gcc
 
 

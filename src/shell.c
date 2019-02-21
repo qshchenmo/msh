@@ -591,11 +591,6 @@ void msh_setprompt(const char* prompt){
 
 static void msh_history_save(char* usr_input)
 {
-    if ('\0' == usr_input[0])
-    {
-        return;
-    }
-
     bzero(msh_his.history[msh_his.next], MSH_BUF_SIZE);
     
     memcpy(msh_his.history[msh_his.next], usr_input, strlen(usr_input));
@@ -655,9 +650,12 @@ static int msh_process(LINE_END_STATUS end, char* usr_input)
     }
     else if (end == END_WITH_ENTER)
     {
-        msh_history_save(usr_input);
-        
-        err = cmd_exec(usr_input);
+        if ('\0' != usr_input[0])
+        {
+            msh_history_save(usr_input);
+            
+            err = cmd_exec(usr_input);
+        }
     }
 
     return err;

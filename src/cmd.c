@@ -22,7 +22,7 @@
 #define CMD_NODE_F_LAST (1<<1)   /* this node is the last node in one command */
 
 #define FULLPATH_MAX_SIZE 256
-#define EXTERNAL_COMMAND_DIR  "/etc/mshd/external/"
+#define EXTERNAL_COMMAND_DIR  "/etc/msh/external/"
 #define MSH_OPT_VALUEHINT_DEFAULT "value"
 
 typedef enum
@@ -683,7 +683,7 @@ int cmd_exec(char* input)
     struct cmd_node* r = root;
     struct cmd_node* s;
     int err = MSH_ERROR_SUCCESS;
-    
+
     for(;;)
     {
         bzero(buf, CMD_NAME_SIZE);        
@@ -740,7 +740,7 @@ static void cmd_quit_install(void)
 
 static int cmd_version_handler(void* ctx)
 {
-    printf("\n  mini shell version %d.%d", MSH_VERSION_MAJOR, MSH_VERSION_MINOR);
+    printf("\n  msh version %d.%d", MSH_VERSION_MAJOR, MSH_VERSION_MINOR);
     return MSH_ERROR_SUCCESS;
 }
 
@@ -750,7 +750,7 @@ static void cmd_version_install(void)
 
     ctx = cmd_ctx_create();
 
-    cmd_def_keyword("version", ctx, "show mini shell");
+    cmd_def_keyword("version", ctx, "show msh version");
 
     cmd_register(ctx, cmd_version_handler);
     
